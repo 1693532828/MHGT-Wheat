@@ -1,0 +1,101 @@
+# ============================================================
+# MHGT-GNN 配置文件模板
+# 小麦条锈病抗性因果功能基因组学框架
+# ============================================================
+
+# --- 数据输入 ---
+data:
+  # 基因型数据（三选一）
+  vcf_file: null                         # 单VCF文件路径
+  vcf_dir: "./data/vcf"                  # VCF目录（会处理第一个文件）
+  plink_prefix: "./data/plink/wheat_qc"  # PLINK BED/BIM/FAM前缀（已有则跳过QC）
+
+  # 表型文件（必须）
+  pheno_file: "./data/pheno.csv"
+  pheno_col: "rust_blup"                 # 表型列名（BLUP值）
+
+  # 可选：RNA-seq表达矩阵（行=基因，列=样本）
+  expr_file: null                        # "./data/expr_matrix.csv"
+
+  # 可选：eQTL结果（列：SNP_ID, Gene_ID, slope, pval）
+  eqtl_file: null                        # "./data/eqtl_results.csv"
+
+  # 可选：基因共表达网络（列：gene1, gene2, correlation）
+  coexpr_file: null                      # "./data/coexpression.csv"
+
+  # 可选：基因注释特征（行=基因，列=数值特征）
+  gene_annot_file: null                  # "./data/gene_features.csv"
+
+  # 输出目录
+  out_dir: "./data/processed"
+
+# --- 质控参数 ---
+qc:
+  maf: 0.05            # 最小等位基因频率
+  missing_rate: 0.2    # 最大缺失率
+  hwe_pval: 1.0e-6     # Hardy-Weinberg检验p值阈值
+  ploidy: 6            # 六倍体小麦
+
+# --- Tokenization ---
+tokenize:
+  ld_window_kb: 100    # LD block窗口（kb）
+  ld_r2: 0.8           # LD r²阈值
+  max_blocks: 2048     # 最大block数（Transformer序列长度）
+  mask_ratio: 0.15     # MLM掩码比例
+
+# --- 图结构 ---
+graph:
+  eqtl_cis_window: 1000000    # cis-eQTL窗口（1Mb）
+  eqtl_pval_thresh: 1.0e-5   # eQTL显著性阈值
+  coexpr_corr_thresh: 0.7    # 共表达相关系数阈值
+  gene_feat_dim: 64           # 基因节点特征维度
+
+# --- 数据划分 ---
+split:
+  val_ratio: 0.1
+  test_ratio: 0.1
+  seed: 42
+
+# --- 模型架构 ---
+model:
+  d_model: 256         # 隐层维度（小数据集用128，大数据集用256/512）
+  nhead: 8             # 注意力头数（d_model必须整除nhead）
+  nlayer: 6            # Transformer层数
+  n_chr: 22            # 染色体数（小麦21条+1个unknown）
+  max_pos: 5000        # 最大物理位置编码
+  n_cov: 10            # 协变量数（PCA分量数）
+  gnn_hidden: 128      # GNN隐层维度
+  dropout: 0.1         # Dropout率
+  ffn_mult: 4          # FFN维度倍数
+
+# --- 训练参数 ---
+training:
+  checkpoint_dir: "./checkpoints"
+  batch_size: 32               # 根据显存调整（A100: 64-128, V100: 32-64, CPU: 8-16）
+  use_amp: true                # 混合精度训练（需要CUDA）
+  grad_clip: 1.0               # 梯度裁剪
+  log_interval: 20             # 每N个batch打印一次
+  patience: 15                 # 早停patience
+  freeze_encoder_layers: 2     # 微调时冻结前N层（0=不冻结）
+  use_uncertainty: true        # 不确定性加权多任务损失
+
+  # Stage 1: 预训练
+  pretrain_lr: 1.0e-4
+  pretrain_epochs: 50          # 大样本（>5000）用30-50轮；小样本（<1000）用20轮
+
+  # Stage 2: 微调
+  finetune_lr: 5.0e-5
+  finetune_epochs: 100         # 含早停，实际轮数通常更少
+
+  # 损失权重（若use_uncertainty=true则自动学习）
+  lambda_mlm: 1.0
+  lambda_pheno: 1.0
+  lambda_eqtl: 0.5
+  lambda_causal: 0.3
+  lambda_mr: 0.1
+
+# --- 输出 ---
+output:
+  results_dir: "./results/interpretation"
+  top_k_genes: 30          # 输出Top K候选基因
+  top_k_regions: 20        # 输出Top K重要基因组区域
